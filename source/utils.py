@@ -1,6 +1,6 @@
-import inspect
+import jnius
 
-from jnius import autoclass
+from benchmarks import measure
 
 UPPERCASE_ABBREVIATIONS = {"AABB", "ID", "IP", "UUID"}
 """Represents all commonly used abbreviations in the Spigot framework"""
@@ -8,15 +8,16 @@ UPPERCASE_ABBREVIATIONS = {"AABB", "ID", "IP", "UUID"}
 imported_classes = {}
 
 
-def camel_case_possibilities(text: str) -> list[str]:
+def camel_case_possibilities(text: str, pascal_case: bool = False) -> list[str]:
     """
     Changes a kebab_case string to camelCase.
     :param text: a kebab_case string
+    :param pascal_case: whether to change the string to camelCase or PascalCase
     :return: the string in camelCase
     """
     results = ["", ""]
     for part in text.split("_"):
-        if not results[0]:
+        if not results[0] and not pascal_case:
             # The first part should always be lowercase
             results[0] += part.lower()
             results[1] += part.lower() if part.upper() not in UPPERCASE_ABBREVIATIONS else part.upper()
@@ -27,7 +28,7 @@ def camel_case_possibilities(text: str) -> list[str]:
     return results if results[0] != results[1] else results[:1]
 
 
-def require(java_class: str):
+def require(java_class: str, default=None):
     """
     Imports a Java class and adds all Python magic methods to it. This allows for a more Pythonic way of using Java,
     adding all the kebab_case variants of the camelCase methods.
@@ -53,12 +54,16 @@ def require(java_class: str):
     That said, the first example still acts as a good example of how to use the require function.
 
     :param java_class: the Java class to import
+    :param default: the default value to pick if the Java class could not be imported
     :return: the imported Java class
     """
     if java_class in imported_classes:
         return imported_classes[java_class]
 
-    imported = autoclass(java_class, include_protected=False, include_private=False)
+    try:
+        imported = jnius.autoclass(java_class, include_protected=False, include_private=False)
+    except jnius.JavaException:
+        imported = default
 
     class JavaWrapper:
         # Unary math operators
@@ -116,45 +121,6 @@ def require(java_class: str):
             pass
 
         def __or__(self, other):
-            pass
-
-        def __iadd__(self, other):
-            pass
-
-        def __isub__(self, other):
-            pass
-
-        def __imul__(self, other):
-            pass
-
-        def __imatmul__(self, other):
-            pass
-
-        def __itruediv__(self, other):
-            pass
-
-        def __ifloordiv__(self, other):
-            pass
-
-        def __imod__(self, other):
-            pass
-
-        def __ipow__(self, other, modulo):
-            pass
-
-        def __ilshift__(self, other):
-            pass
-
-        def __irshift__(self, other):
-            pass
-
-        def __iand__(self, other):
-            pass
-
-        def __ixor__(self, other):
-            pass
-
-        def __ior__(self, other):
             pass
 
         # Special math functions
@@ -237,18 +203,27 @@ def require(java_class: str):
         def __delattr__(self, item):
             pass
 
+        @measure("getattr")
         def __getattr__(self, item):
-            for possibility in camel_case_possibilities(item):
-                if hasattr(self, possibility):
-                    return getattr(self, possibility)()
-                elif hasattr(self, "get" + possibility):
-                    return getattr(self, "get" + possibility)()
-                elif hasattr(self, "is" + possibility):
-                    return getattr(self, "is" + possibility)()
+            print("$__getattr__", item)
+            # Because we are putting "get" and "is" in front of it, we need to use PascalCase
+            for possibility in camel_case_possibilities(item, pascal_case=True):
+                # If the attribute exists on its own, it's probably camelCase, not PascalCase
+                if possibility[0].lower() + possibility[1:] in dir(self):
+                    result = getattr(self, possibility[0].lower() + possibility[1:])
+                elif "get" + possibility in dir(self):
+                    result = getattr(self, "get" + possibility)
+                elif "is" + possibility in dir(self):
+                    result = getattr(self, "is" + possibility)
+                else:
+                    raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+
+                return result() if callable(result) else result
 
         def __setattr__(self, key, value):
-            for possibility in camel_case_possibilities(key):
-                if hasattr(self, "set" + possibility):
+            # Because we are putting "set" in front of it, we need to use PascalCase
+            for possibility in camel_case_possibilities(key, pascal_case=True):
+                if "set" + possibility in dir(self):
                     return getattr(self, "set" + possibility)(value)
 
         # String representation methods
